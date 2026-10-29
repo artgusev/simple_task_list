@@ -1,9 +1,11 @@
 interface Props {
   onCreateProject: () => void;
   onLoadSample: () => void;
+  /** Present when the localStorage version of the app left data in this browser. */
+  onImportLocal?: () => void;
 }
 
-export function EmptyState({ onCreateProject, onLoadSample }: Props) {
+export function EmptyState({ onCreateProject, onLoadSample, onImportLocal }: Props) {
   return (
     <div className="empty">
       <h2>No projects yet</h2>
@@ -19,6 +21,14 @@ export function EmptyState({ onCreateProject, onLoadSample }: Props) {
           Load sample data
         </button>
       </div>
+      {onImportLocal && (
+        <p className="field__hint">
+          This browser still has tasks from the earlier version.{' '}
+          <button type="button" className="link-btn link-btn--inline" onClick={onImportLocal}>
+            Import them to the server
+          </button>
+        </p>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { TaskList } from './components/TaskList';
 import { TopBar } from './components/TopBar';
 import { todayISO } from './lib/dates';
 import { uid } from './lib/id';
+import { readLegacyLocalData } from './lib/legacy';
 import { buildSampleData } from './lib/sample';
 import { nextOrder, useAppData } from './store';
 import { ALL_PROJECTS, PROJECT_COLORS, type Project, type ProjectColor, type Task } from './types';
@@ -25,12 +26,13 @@ function readSelection(): string {
 }
 
 export default function App() {
-  const [data, dispatch] = useAppData();
+  const { data, status, error, dispatch, reload } = useAppData();
   const [selection, setSelection] = useState(readSelection);
   const [showDone, setShowDone] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [projectDialog, setProjectDialog] = useState<ProjectDialogState>(null);
+  const legacyData = useMemo(readLegacyLocalData, []);
 
   const { projects, tasks } = data;
   const projectById = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
@@ -44,10 +46,10 @@ export default function App() {
     }
   }, [selection]);
 
-  // A selected project that no longer exists falls back to "All projects".
+  // A selected project that no longer exists falls back to "All projects" (once data has loaded).
   useEffect(() => {
-    if (selection !== ALL_PROJECTS && !projectById.has(selection)) setSelection(ALL_PROJECTS);
-  }, [selection, projectById]);
+    if (status === 'ready' && selection !== ALL_PROJECTS && !projectById.has(selection)) setSelection(ALL_PROJECTS);
+  }, [status, selection, projectById]);
 
   const tasksByProject = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -74,6 +76,7 @@ export default function App() {
   const nextColor: ProjectColor = PROJECT_COLORS[projects.length % PROJECT_COLORS.length] ?? 'blue';
 
   function handleAdd() {
+    if (status !== 'ready') return;
     if (projects.length === 0) setProjectDialog({ mode: 'new' });
     else setNewTaskOpen(true);
   }
@@ -113,6 +116,45 @@ export default function App() {
     if (selection === id) setSelection(ALL_PROJECTS);
   }
 
+  function renderMain() {
+    if (status === 'loading') return <p className="hint hint--page">Loading your tasks…</p>;
+    if (status === 'offline') {
+      return (
+        <div className="empty">
+          <h2>Can't reach the server</h2>
+          <p>{error ?? 'The task server did not answer.'}</p>
+          <div className="empty__actions">
+            <button type="button" className="btn btn--primary" onClick={() => void reload()}>
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (projects.length === 0) {
+      return (
+        <EmptyState
+          onCreateProject={() => setProjectDialog({ mode: 'new' })}
+          onLoadSample={() => dispatch({ type: 'data/replace', data: buildSampleData() })}
+          onImportLocal={legacyData ? () => dispatch({ type: 'data/replace', data: legacyData }) : undefined}
+        />
+      );
+    }
+    if (selectedProject) {
+      return (
+        <TaskList
+          project={selectedProject}
+          tasks={tasksByProject.get(selectedProject.id) ?? []}
+          showDone={showDone}
+          onOpenTask={setOpenTaskId}
+        />
+      );
+    }
+    return (
+      <AllProjectsBoard projects={projects} tasksByProject={tasksByProject} showDone={showDone} onOpenTask={setOpenTaskId} />
+    );
+  }
+
   return (
     <div className="app">
       <TopBar
@@ -128,28 +170,16 @@ export default function App() {
         onAdd={handleAdd}
       />
 
-      <main className="main">
-        {projects.length === 0 ? (
-          <EmptyState
-            onCreateProject={() => setProjectDialog({ mode: 'new' })}
-            onLoadSample={() => dispatch({ type: 'data/replace', data: buildSampleData() })}
-          />
-        ) : selectedProject ? (
-          <TaskList
-            project={selectedProject}
-            tasks={tasksByProject.get(selectedProject.id) ?? []}
-            showDone={showDone}
-            onOpenTask={setOpenTaskId}
-          />
-        ) : (
-          <AllProjectsBoard
-            projects={projects}
-            tasksByProject={tasksByProject}
-            showDone={showDone}
-            onOpenTask={setOpenTaskId}
-          />
-        )}
-      </main>
+      {error && status === 'ready' && (
+        <div className="banner" role="alert">
+          <span className="banner__text">Couldn't save to the server: {error}</span>
+          <button type="button" className="btn btn--small" onClick={() => void reload()}>
+            Reload from server
+          </button>
+        </div>
+      )}
+
+      <main className="main">{renderMain()}</main>
 
       {openTask && openTaskProject && (
         <TaskDialog

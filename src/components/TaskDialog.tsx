@@ -1,6 +1,6 @@
 import { useState, type KeyboardEvent } from 'react';
 import { describeDeadline, describeInWork, formatDateTime } from '../lib/dates';
-import type { Project, Task } from '../types';
+import type { Project, Task, TaskPatch } from '../types';
 import { CalendarIcon, CheckIcon, ClockIcon, CloseIcon, SendIcon } from './icons';
 import { Modal } from './Modal';
 
@@ -9,7 +9,7 @@ interface Props {
   project: Project;
   projects: Project[];
   onClose: () => void;
-  onUpdate: (patch: Partial<Omit<Task, 'id'>>) => void;
+  onUpdate: (patch: TaskPatch) => void;
   onDelete: () => void;
   onAddComment: (text: string) => void;
   onDeleteComment: (commentId: string) => void;

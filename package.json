@@ -1,22 +1,32 @@
 {
   "name": "working-stack",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/index.ts --port 3000",
+    "dev:client": "vite",
+    "build": "npm run typecheck && vite build && tsc -p server/tsconfig.json",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p server/tsconfig.json"
   },
   "dependencies": {
+    "express": "^5.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
     "typescript": "~5.7.2",
     "vite": "^6.0.0"
   }
