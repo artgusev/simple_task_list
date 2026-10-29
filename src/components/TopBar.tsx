@@ -9,6 +9,8 @@ interface Props {
   onSelect: (selection: string) => void;
   onNewProject: () => void;
   onEditProject: (projectId: string) => void;
+  /** Present only when the app is password protected. */
+  onSignOut?: () => void;
   doneCount: number;
   showDone: boolean;
   onToggleDone: () => void;

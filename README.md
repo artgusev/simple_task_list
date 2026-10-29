@@ -38,12 +38,14 @@ PORT=3000 DB_PATH=/var/lib/working-stack/working-stack.db npm start
 
 Environment variables:
 
-| Variable     | Default                     | Meaning                                   |
-| ------------ | --------------------------- | ----------------------------------------- |
-| `PORT`       | `3000`                      | Port to listen on                         |
-| `HOST`       | `0.0.0.0`                   | Interface to bind                         |
-| `DB_PATH`    | `./data/working-stack.db`   | SQLite file (directory is created)        |
-| `CLIENT_DIR` | `dist/client`               | Where the built UI lives                  |
+| Variable         | Default                     | Meaning                                                |
+| ---------------- | --------------------------- | ------------------------------------------------------ |
+| `PORT`           | `3000`                      | Port to listen on                                      |
+| `HOST`           | `0.0.0.0`                   | Interface to bind                                      |
+| `DB_PATH`        | `./data/working-stack.db`   | SQLite file (directory is created)                     |
+| `CLIENT_DIR`     | `dist/client`               | Where the built UI lives                               |
+| `APP_PASSWORD`   | unset                       | Require this password to use the app (see below)       |
+| `SESSION_SECRET` | unset                       | Extra key material for session cookies (see below)     |
 
 Back up the app by copying the SQLite file (and its `-wal` / `-shm` siblings, or run `sqlite3 file ".backup out.db"`).
 
@@ -59,6 +61,7 @@ User=www-data
 WorkingDirectory=/opt/working-stack
 Environment=PORT=3000
 Environment=DB_PATH=/var/lib/working-stack/working-stack.db
+Environment=APP_PASSWORD=change-me
 ExecStart=/usr/bin/node dist/server/index.js
 Restart=on-failure
 
@@ -70,14 +73,36 @@ WantedBy=multi-user.target
 
 ```bash
 docker build -t working-stack .
-docker run -d --name working-stack -p 3000:3000 -v working-stack-data:/data working-stack
+docker run -d --name working-stack -p 3000:3000 -v working-stack-data:/data -e APP_PASSWORD=change-me working-stack
 ```
 
-### There is no login
+### Password protection
 
-The API accepts requests from anyone who can reach the port. Keep it on a private network or VPN, or put it
-behind a reverse proxy (nginx, Caddy, Traefik) that adds HTTPS and authentication, for example HTTP basic auth.
-Do not expose port 3000 directly to the internet.
+There is one user and, optionally, one password.
+
+- **`APP_PASSWORD` unset or empty:** the app is open. Anyone who can reach the port can read and change every
+  task, so keep it on a private network or VPN, or behind a reverse proxy that adds authentication. Do not expose
+  it to the internet like this.
+- **`APP_PASSWORD` set:** the browser shows a login screen, and every request under `/api` must carry the session
+  cookie, otherwise it is answered with `401 {"error":"Unauthorized"}`. The only exceptions are `GET /api/session`,
+  `POST /api/login` and `POST /api/logout`. The static files (`index.html`, scripts, styles) stay public; they
+  contain no data.
+
+Signing in sets the cookie `ws_session`: HttpOnly, SameSite=Lax, path `/api`, valid for 30 days, and `Secure`
+when the request arrived over HTTPS (directly, or through a proxy that sends `X-Forwarded-Proto: https`). Serve
+the app over HTTPS: without it the password travels in clear text. Open the project switcher and choose
+**Sign out** to drop the cookie on that device.
+
+The cookie holds a signed, time-limited token; nothing is stored on the server, so a restart keeps you signed
+in. The signing key is derived (scrypt) from `APP_PASSWORD`, salted with `SESSION_SECRET` when that is set.
+Changing either value signs every device out, which is also how you revoke a cookie you think has leaked.
+`SESSION_SECRET` is optional: with a long random value (`openssl rand -hex 32`) a stolen cookie cannot be used to
+guess the password offline, so set it when the password is short.
+
+Login attempts are rate-limited in memory: after 5 wrong passwords within a minute an address gets
+`429 Too Many Requests` with a `Retry-After` header until the minute is up. Behind a reverse proxy every
+attempt comes from the proxy's address, so the limit is effectively one for all clients, which is fine for one
+user. The counters reset when the server restarts.
 
 ## API
 
@@ -85,6 +110,9 @@ All endpoints are under `/api` and speak JSON.
 
 | Method   | Path                                 | Purpose                                   |
 | -------- | ------------------------------------ | ----------------------------------------- |
+| `GET`    | `/session`                           | `{ protected, authenticated }` for this browser |
+| `POST`   | `/login`                             | `{ password }`; sets the session cookie   |
+| `POST`   | `/logout`                            | Clears the session cookie                 |
 | `GET`    | `/data`                              | Everything: projects and tasks with comments |
 | `PUT`    | `/data`                              | Replace everything (sample data, imports) |
 | `POST`   | `/projects`                          | Create a project                          |
@@ -116,17 +144,19 @@ shared/types.ts           Project / Task / Comment types used on both sides
 server/
   index.ts                reads env, opens the database, starts listening
   app.ts                  Express app: JSON API, static client, error handling
+  auth.ts                 optional password: session cookie, login/logout, rate limit
   routes.ts               /api routes and request validation
   repo.ts                 SQL queries
   db.ts                   schema and connection
 src/
   App.tsx                 state wiring, dialogs, view switching
   store.ts                local state + server sync hook
+  session.ts              asks the server whether a password is needed; reacts to 401s
   sync.ts                 ordered request queue with merged edits
   api.ts                  fetch helpers for /api
   lib/dates.ts            deadline and "in work" formatting
   lib/sample.ts           sample projects and tasks for an empty install
   components/             TopBar, ProjectMenu, TaskList, AllProjectsBoard,
-                          TaskCard, TaskDialog, NewTaskDialog, ProjectDialog
+                          TaskCard, TaskDialog, NewTaskDialog, ProjectDialog, LoginScreen
   styles.css              design tokens and all styling
 ```

@@ -1,18 +1,22 @@
-import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import express, { type ErrorRequestHandler } from 'express';
+import type { Auth } from './auth.js';
 import { createRouter } from './routes.js';
 import { HttpError } from './validate.js';
 
 /**
  * The HTTP app: JSON API under /api, and (when a client build exists) the static
  * single-page app for every other GET so deep links reload correctly.
+ *
+ * Only /api is gated by the session cookie; the client files are public.
  */
-export function createApp(db: DatabaseSync, clientDir: string | null): express.Express {
+export function createApp(db: DatabaseSync, clientDir: string | null, auth: Auth): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '5mb' }));
 
+  app.use('/api', auth.router);
+  app.use('/api', auth.guard);
   app.use('/api', createRouter(db));
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });
@@ -21,7 +25,8 @@ export function createApp(db: DatabaseSync, clientDir: string | null): express.E
   if (clientDir) {
     app.use(express.static(clientDir, { index: false, maxAge: '1h' }));
     app.get(/.*/, (_req, res) => {
-      res.sendFile(join(clientDir, 'index.html'), { headers: { 'Cache-Control': 'no-cache' } });
+      // `root` keeps sendFile from refusing a client directory that sits under a dot-folder.
+      res.sendFile('index.html', { root: clientDir, headers: { 'Cache-Control': 'no-cache' } });
     });
   }
 

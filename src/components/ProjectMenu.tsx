@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ALL_PROJECTS, type Project } from '../types';
-import { CheckIcon, ChevronDownIcon, PencilIcon, PlusIcon } from './icons';
+import { CheckIcon, ChevronDownIcon, LogOutIcon, PencilIcon, PlusIcon } from './icons';
 
 interface Props {
   projects: Project[];
@@ -10,9 +10,11 @@ interface Props {
   onSelect: (selection: string) => void;
   onNewProject: () => void;
   onEditProject: (projectId: string) => void;
+  /** Present only when the app is password protected; adds a "Sign out" entry. */
+  onSignOut?: () => void;
 }
 
-export function ProjectMenu({ projects, counts, selection, onSelect, onNewProject, onEditProject }: Props) {
+export function ProjectMenu({ projects, counts, selection, onSelect, onNewProject, onEditProject, onSignOut }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -130,6 +132,15 @@ export function ProjectMenu({ projects, counts, selection, onSelect, onNewProjec
             <PlusIcon size={16} />
             <span className="menu__label">New project</span>
           </button>
+          {onSignOut && (
+            <>
+              <div className="menu__sep" role="separator" />
+              <button type="button" role="menuitem" className="menu__item menu__item--quiet" onClick={() => run(onSignOut)}>
+                <LogOutIcon size={16} />
+                <span className="menu__label">Sign out</span>
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

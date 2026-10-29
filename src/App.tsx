@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AllProjectsBoard } from './components/AllProjectsBoard';
 import { EmptyState } from './components/EmptyState';
+import { LoginScreen } from './components/LoginScreen';
 import { NewTaskDialog, type NewTaskInput } from './components/NewTaskDialog';
 import { ProjectDialog, type ProjectInput } from './components/ProjectDialog';
 import { TaskDialog } from './components/TaskDialog';
@@ -10,6 +11,7 @@ import { todayISO } from './lib/dates';
 import { uid } from './lib/id';
 import { readLegacyLocalData } from './lib/legacy';
 import { buildSampleData } from './lib/sample';
+import { useSession } from './session';
 import { nextOrder, useAppData } from './store';
 import { ALL_PROJECTS, PROJECT_COLORS, type Project, type ProjectColor, type Task } from './types';
 
@@ -25,8 +27,33 @@ function readSelection(): string {
   }
 }
 
+/** Decides between the login screen and the task UI; the task UI only mounts once a session is in place. */
 export default function App() {
-  const { data, status, error, dispatch, reload } = useAppData();
+  const session = useSession();
+
+  if (session.status === 'checking') {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <span className="pill-button pill-button--static">Working Stack</span>
+        </header>
+        <main className="main">
+          <p className="hint hint--page">Loading your tasks…</p>
+        </main>
+      </div>
+    );
+  }
+  if (session.status === 'locked') return <LoginScreen onSignedIn={session.signedIn} />;
+  return <Workspace onSignOut={session.status === 'unlocked' ? session.signOut : undefined} />;
+}
+
+interface WorkspaceProps {
+  /** Present only when the app is password protected. */
+  onSignOut?: () => Promise<void>;
+}
+
+function Workspace({ onSignOut }: WorkspaceProps) {
+  const { data, status, error, dispatch, reload, flush } = useAppData();
   const [selection, setSelection] = useState(readSelection);
   const [showDone, setShowDone] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -116,6 +143,12 @@ export default function App() {
     if (selection === id) setSelection(ALL_PROJECTS);
   }
 
+  function signOut() {
+    // Edits still waiting for the typing pause go out first, while the cookie is still there.
+    flush();
+    void onSignOut?.();
+  }
+
   function renderMain() {
     if (status === 'loading') return <p className="hint hint--page">Loading your tasks…</p>;
     if (status === 'offline') {
@@ -164,6 +197,7 @@ export default function App() {
         onSelect={setSelection}
         onNewProject={() => setProjectDialog({ mode: 'new' })}
         onEditProject={(projectId) => setProjectDialog({ mode: 'edit', projectId })}
+        onSignOut={onSignOut ? signOut : undefined}
         doneCount={doneCount}
         showDone={showDone}
         onToggleDone={() => setShowDone((v) => !v)}

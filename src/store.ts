@@ -67,6 +67,8 @@ export interface AppStore {
   dispatch: (action: Action) => void;
   /** Fetches the server's copy and replaces local state with it. */
   reload: () => Promise<void>;
+  /** Sends edits that are still waiting for the typing pause. */
+  flush: () => void;
 }
 
 export function useAppData(): AppStore {
@@ -120,5 +122,7 @@ export function useAppData(): AppStore {
     [queue],
   );
 
-  return { data, status, error, dispatch, reload };
+  const flush = useCallback(() => queue.flush(), [queue]);
+
+  return { data, status, error, dispatch, reload, flush };
 }

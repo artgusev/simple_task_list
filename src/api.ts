@@ -13,6 +13,21 @@ export class ApiError extends Error {
 export interface RequestOptions {
   /** Lets the request finish even when the page is being closed. */
   keepalive?: boolean;
+  /** Set to false where a 401 is an answer, not a lost session (the login request). */
+  reportUnauthorized?: boolean;
+}
+
+/** Whether the server wants a password, and whether this browser has signed in. */
+export interface SessionInfo {
+  protected: boolean;
+  authenticated: boolean;
+}
+
+let unauthorizedListener: (() => void) | null = null;
+
+/** Registers the one callback that runs when any request (other than a login) gets a 401. */
+export function onUnauthorized(listener: (() => void) | null): void {
+  unauthorizedListener = listener;
 }
 
 async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
@@ -35,6 +50,7 @@ async function request<T>(method: string, path: string, body?: unknown, options:
     } catch {
       // Not a JSON error body; keep the status text.
     }
+    if (response.status === 401 && options.reportUnauthorized !== false) unauthorizedListener?.();
     throw new ApiError(response.status, message);
   }
   if (response.status === 204) return undefined as T;
@@ -42,6 +58,10 @@ async function request<T>(method: string, path: string, body?: unknown, options:
 }
 
 export const api = {
+  getSession: () => request<SessionInfo>('GET', '/api/session'),
+  login: (password: string) => request<SessionInfo>('POST', '/api/login', { password }, { reportUnauthorized: false }),
+  logout: () => request<void>('POST', '/api/logout'),
+
   getData: () => request<AppData>('GET', '/api/data'),
   replaceData: (data: AppData) => request<AppData>('PUT', '/api/data', data),
 
