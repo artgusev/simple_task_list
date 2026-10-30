@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { createAuth, describeAuth } from './auth.js';
 import { openDatabase } from './db.js';
+import { EncryptionError, describeEncryption, setupEncryption } from './encryption.js';
+import type { Store } from './repo.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -20,9 +22,10 @@ const dbPath = process.env.DB_PATH ?? resolve(process.cwd(), 'data', 'working-st
 const clientDir = process.env.CLIENT_DIR ?? resolve(here, '..', 'client');
 
 const db = openDatabase(dbPath);
+const store: Store = { db, codec: openCodec() };
 const serveClient = existsSync(clientDir);
 const auth = createAuth({ password: process.env.APP_PASSWORD, secret: process.env.SESSION_SECRET });
-const app = createApp(db, serveClient ? clientDir : null, auth);
+const app = createApp(store, serveClient ? clientDir : null, auth);
 
 const server = app.listen(port, host, () => {
   console.log(`Working Stack API listening on http://${host}:${port}`);
@@ -33,7 +36,22 @@ const server = app.listen(port, host, () => {
       : 'No client build found; in development the Vite dev server serves the UI',
   );
   console.log(describeAuth(auth));
+  console.log(describeEncryption(store.codec));
 });
+
+/** A wrong or missing key is a configuration problem: say so plainly and stop, rather than serve ciphertext. */
+function openCodec() {
+  try {
+    return setupEncryption(db, process.env.DB_ENCRYPTION_KEY);
+  } catch (error) {
+    if (error instanceof EncryptionError) {
+      console.error(`Working Stack cannot start: ${error.message}`);
+      db.close();
+      process.exit(1);
+    }
+    throw error;
+  }
+}
 
 function shutdown() {
   server.close(() => {

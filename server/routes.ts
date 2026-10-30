@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
 import express from 'express';
 import type { AppData, Comment, Project, ProjectPatch, Task, TaskPatch } from '../shared/types.js';
 import * as repo from './repo.js';
+import type { Store } from './repo.js';
 import {
   HttpError,
   color,
@@ -108,71 +108,71 @@ function parseData(input: unknown): AppData {
 
 // ---------- Routes ----------
 
-export function createRouter(db: DatabaseSync): express.Router {
+export function createRouter(store: Store): express.Router {
   const router = express.Router();
 
   const requireProject = (projectId: string) => {
-    if (!repo.getProject(db, projectId)) throw new HttpError(400, 'Unknown project');
+    if (!repo.getProject(store, projectId)) throw new HttpError(400, 'Unknown project');
   };
 
   router.get('/data', (_req, res) => {
-    res.json(repo.getAll(db));
+    res.json(repo.getAll(store));
   });
 
   router.put('/data', (req, res) => {
-    repo.replaceAll(db, parseData(req.body));
-    res.json(repo.getAll(db));
+    repo.replaceAll(store, parseData(req.body));
+    res.json(repo.getAll(store));
   });
 
   router.post('/projects', (req, res) => {
     const project = parseProject(req.body);
-    if (repo.getProject(db, project.id)) throw new HttpError(409, 'A project with this id already exists');
-    repo.insertProject(db, project);
+    if (repo.getProject(store, project.id)) throw new HttpError(409, 'A project with this id already exists');
+    repo.insertProject(store, project);
     res.status(201).json(project);
   });
 
   router.patch('/projects/:id', (req, res) => {
     const patch = parseProjectPatch(req.body);
-    const project = repo.updateProject(db, req.params.id, patch);
+    const project = repo.updateProject(store, req.params.id, patch);
     if (!project) throw new HttpError(404, 'Project not found');
     res.json(project);
   });
 
   router.delete('/projects/:id', (req, res) => {
-    if (!repo.deleteProject(db, req.params.id)) throw new HttpError(404, 'Project not found');
+    if (!repo.deleteProject(store, req.params.id)) throw new HttpError(404, 'Project not found');
     res.status(204).end();
   });
 
   router.post('/tasks', (req, res) => {
-    const task = parseTask(req.body, repo.nextTaskPosition(db));
+    const task = parseTask(req.body, repo.nextTaskPosition(store));
     requireProject(task.projectId);
-    if (repo.getTask(db, task.id)) throw new HttpError(409, 'A task with this id already exists');
-    repo.insertTask(db, task);
+    if (repo.getTask(store, task.id)) throw new HttpError(409, 'A task with this id already exists');
+    repo.insertTask(store, task);
     res.status(201).json(task);
   });
 
   router.patch('/tasks/:id', (req, res) => {
     const patch = parseTaskPatch(req.body);
     if (patch.projectId !== undefined) requireProject(patch.projectId);
-    const task = repo.updateTask(db, req.params.id, patch);
+    const task = repo.updateTask(store, req.params.id, patch);
     if (!task) throw new HttpError(404, 'Task not found');
     res.json(task);
   });
 
   router.delete('/tasks/:id', (req, res) => {
-    if (!repo.deleteTask(db, req.params.id)) throw new HttpError(404, 'Task not found');
+    if (!repo.deleteTask(store, req.params.id)) throw new HttpError(404, 'Task not found');
     res.status(204).end();
   });
 
   router.post('/tasks/:id/comments', (req, res) => {
-    if (!repo.getTask(db, req.params.id)) throw new HttpError(404, 'Task not found');
+    if (!repo.getTask(store, req.params.id)) throw new HttpError(404, 'Task not found');
     const comment = parseComment(req.body);
-    repo.insertComment(db, req.params.id, comment);
+    repo.insertComment(store, req.params.id, comment);
     res.status(201).json(comment);
   });
 
   router.delete('/tasks/:id/comments/:commentId', (req, res) => {
-    if (!repo.deleteComment(db, req.params.id, req.params.commentId)) throw new HttpError(404, 'Comment not found');
+    if (!repo.deleteComment(store, req.params.id, req.params.commentId)) throw new HttpError(404, 'Comment not found');
     res.status(204).end();
   });
 

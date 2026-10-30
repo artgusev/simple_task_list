@@ -46,8 +46,10 @@ Environment variables:
 | `CLIENT_DIR`     | `dist/client`               | Where the built UI lives                               |
 | `APP_PASSWORD`   | unset                       | Require this password to use the app (see below)       |
 | `SESSION_SECRET` | unset                       | Extra key material for session cookies (see below)     |
+| `DB_ENCRYPTION_KEY` | unset                    | Encrypt everything you write in the database (see below) |
 
 Back up the app by copying the SQLite file (and its `-wal` / `-shm` siblings, or run `sqlite3 file ".backup out.db"`).
+With encryption on, the backup is encrypted too, so keep a copy of the key somewhere else.
 
 ### systemd example
 
@@ -62,6 +64,7 @@ WorkingDirectory=/opt/working-stack
 Environment=PORT=3000
 Environment=DB_PATH=/var/lib/working-stack/working-stack.db
 Environment=APP_PASSWORD=change-me
+Environment=DB_ENCRYPTION_KEY=change-me-too
 ExecStart=/usr/bin/node dist/server/index.js
 Restart=on-failure
 
@@ -69,11 +72,15 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+To keep the secrets out of the unit file, put the `Environment=` lines in `/etc/working-stack.env` (mode 600) and
+point to it with `EnvironmentFile=/etc/working-stack.env`.
+
 ### Docker
 
 ```bash
 docker build -t working-stack .
-docker run -d --name working-stack -p 3000:3000 -v working-stack-data:/data -e APP_PASSWORD=change-me working-stack
+docker run -d --name working-stack -p 3000:3000 -v working-stack-data:/data \
+  -e APP_PASSWORD=change-me -e DB_ENCRYPTION_KEY=change-me-too working-stack
 ```
 
 ### Password protection
@@ -103,6 +110,45 @@ Login attempts are rate-limited in memory: after 5 wrong passwords within a minu
 `429 Too Many Requests` with a `Retry-After` header until the minute is up. Behind a reverse proxy every
 attempt comes from the proxy's address, so the limit is effectively one for all clients, which is fine for one
 user. The counters reset when the server restarts.
+
+### Encryption at rest
+
+Set `DB_ENCRYPTION_KEY` and everything you write is stored encrypted: project names, task titles,
+descriptions, context and comments sit in the SQLite file as AES-256-GCM ciphertext. Someone who gets hold of
+the file (a backup, a copied volume, a disk snapshot) sees the shape of the data but none of the words. Ids,
+dates, project colours and the order of tasks stay readable: the queries need them, and on their own they
+give nothing away.
+
+- **First start with a key:** a plain database is encrypted in place, in one transaction, before the server
+  starts listening. The log says how many values were sealed.
+- **Encrypted database, no key:** the server refuses to start and says why. It never serves ciphertext as data.
+- **Wrong key:** the server refuses to start, and nothing is changed.
+
+The key can be any string; a long random one is best (`openssl rand -hex 32`). The AES key is derived from it
+with scrypt and a random salt that is stored in the database, so the same `DB_ENCRYPTION_KEY` opens a copy of the
+file on another machine, while the file alone does not help anyone guess the key. Every value is also bound to
+its own row and column, so a ciphertext copied into another task fails to decrypt instead of showing up there.
+
+Keep the key somewhere other than next to the database: the service's environment file, a secrets manager,
+your password manager. **Without the key the data cannot be recovered.** Backups of an encrypted database are
+encrypted too.
+
+What this does not cover: anyone who can run commands on the server as the app's user can read the key from
+its environment, and the running process holds the key in memory. It protects the file, not the server, so
+keep the password protection on as well.
+
+To change the state of an existing database, stop the server and use the maintenance tool:
+
+```bash
+DB_PATH=/var/lib/working-stack/working-stack.db node dist/server/dbtool.js status
+```
+
+| Command   | Needs                                        | Effect                                                       |
+| --------- | -------------------------------------------- | ------------------------------------------------------------ |
+| `status`  | nothing                                      | Says whether the file is encrypted                           |
+| `encrypt` | `DB_ENCRYPTION_KEY`                          | Encrypts a plain file (the server does this on its own, too) |
+| `decrypt` | `DB_ENCRYPTION_KEY`                          | Back to plain text; unset the variable before the next start |
+| `rotate`  | `DB_ENCRYPTION_KEY`, `DB_ENCRYPTION_KEY_NEW` | Re-encrypts with the new key; update the variable before the next start |
 
 ## API
 
@@ -136,6 +182,7 @@ it refreshes from the server, so changes from another device show up.
 | `npm run build`     | Type-check, build the client, compile the server        |
 | `npm start`         | Run the built server (serves API and UI)                |
 | `npm run typecheck` | Type-check client and server                            |
+| `node dist/server/dbtool.js` | Database encryption: `status`, `encrypt`, `decrypt`, `rotate` |
 
 ## Layout
 
@@ -146,8 +193,11 @@ server/
   app.ts                  Express app: JSON API, static client, error handling
   auth.ts                 optional password: session cookie, login/logout, rate limit
   routes.ts               /api routes and request validation
-  repo.ts                 SQL queries
+  repo.ts                 SQL queries, through the codec for text columns
   db.ts                   schema and connection
+  encryption.ts           encryption state: key check, first-run encryption, decrypt, rotate
+  crypto.ts               AES-256-GCM per value, scrypt key derivation
+  dbtool.ts               command line: status / encrypt / decrypt / rotate
 src/
   App.tsx                 state wiring, dialogs, view switching
   store.ts                local state + server sync hook

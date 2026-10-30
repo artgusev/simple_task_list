@@ -1,6 +1,6 @@
-import type { DatabaseSync } from 'node:sqlite';
 import express, { type ErrorRequestHandler } from 'express';
 import type { Auth } from './auth.js';
+import type { Store } from './repo.js';
 import { createRouter } from './routes.js';
 import { HttpError } from './validate.js';
 
@@ -10,14 +10,14 @@ import { HttpError } from './validate.js';
  *
  * Only /api is gated by the session cookie; the client files are public.
  */
-export function createApp(db: DatabaseSync, clientDir: string | null, auth: Auth): express.Express {
+export function createApp(store: Store, clientDir: string | null, auth: Auth): express.Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '5mb' }));
 
   app.use('/api', auth.router);
   app.use('/api', auth.guard);
-  app.use('/api', createRouter(db));
+  app.use('/api', createRouter(store));
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
